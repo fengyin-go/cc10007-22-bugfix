@@ -28,8 +28,27 @@
         </tr>
       </tbody>
     </table>
+    <h3 style="margin-top: 20px">历史补数区间凭证摘要</h3>
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>任务编号</th><th>凭证状态</th><th>完成水位</th><th>失效区间</th><th>完成印</th><th>归属</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr v-for="item in backfillView" :key="item.id">
+          <td>{{ item.taskCode }}</td>
+          <td>{{ item.status }}</td>
+          <td>{{ item.watermark || '未推进' }}</td>
+          <td :class="item.voidCount > 0 ? 'error-text' : ''">{{ item.voidIntervals }}</td>
+          <td>{{ item.sealed ? '已签章' : '无完成印' }}</td>
+          <td>{{ item.ownerGroup }}·{{ item.ownership }}</td>
+        </tr>
+      </tbody>
+    </table>
+
     <footer class="page-foot">
-      <span>数据保存在本机浏览器里，换浏览器或清缓存会回到示例数据</span>
+      <span>数据保存在本机浏览器里，换浏览器或清缓存会回到示例数据；补数指标统一读取区间凭证</span>
     </footer>
   </section>
 </template>
@@ -37,16 +56,18 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 
-import { loadOverview } from '@/api/local-service'
+import { loadBackfillMonitorView, loadOverview } from '@/api/local-service'
 import type { OverviewResult } from '@/data/types'
 
 const cards = ref<OverviewResult['cards']>([])
 const moduleRows = ref<OverviewResult['modules']>([])
+const backfillView = ref(loadBackfillMonitorView())
 
 function refresh() {
   const payload = loadOverview()
   cards.value = payload.cards
   moduleRows.value = payload.modules
+  backfillView.value = loadBackfillMonitorView()
 }
 
 onMounted(refresh)

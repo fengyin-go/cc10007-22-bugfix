@@ -35,3 +35,6 @@ body { margin: 0; background: #f6f8fb; color: #1f2937; }
 .error-text { color: #b42318; }
 .status-legend { display: flex; flex-wrap: wrap; gap: 12px; margin: 0 0 10px; font-size: 12px; color: var(--muted); }
 .legend-item { background: #eef2f7; border-radius: 999px; padding: 2px 10px; }
+.group-switch { display: inline-flex; align-items: center; gap: 6px; margin-left: 12px; }
+.group-switch select { padding: 2px 6px; border-radius: 6px; border: 1px solid var(--border); }
+.voucher-panel h3 { font-size: 14px; margin: 16px 0 8px; }

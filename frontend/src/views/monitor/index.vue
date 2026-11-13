@@ -3,7 +3,9 @@
     <header class="page-head">
       <div>
         <h2>任务监控管理</h2>
-        <p class="page-desc">维护任务监控配置的输入、执行约束与结果记录，为任务运行监控提供可验证的数据工程流程。</p>
+        <p class="page-desc">
+          补数监控直接读取区间凭证：只认归档完成印，失败计划的空洞区间原样透出，避免把终止误读成成功。
+        </p>
       </div>
       <div class="page-actions">
         <button class="btn primary" type="button" @click="openCreate">登记监控配置</button>
@@ -11,7 +13,42 @@
       </div>
     </header>
 
-    <div class="stat-row">
+    <h3>补数区间凭证监控（历史补数为主对象）</h3>
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>任务编号</th>
+          <th>目标表</th>
+          <th>凭证状态</th>
+          <th>完成水位</th>
+          <th>失效区间</th>
+          <th>签收/失效</th>
+          <th>完成印</th>
+          <th>签章核对</th>
+          <th>归属</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr v-for="item in backfillView" :key="item.id">
+          <td>{{ item.taskCode }}</td>
+          <td>{{ item.targetTable }}</td>
+          <td>{{ item.status }}</td>
+          <td>{{ item.watermark || '未推进' }}</td>
+          <td :class="item.voidCount > 0 ? 'error-text' : ''">{{ item.voidIntervals }}</td>
+          <td>{{ item.receivedCount }} / {{ item.voidCount }}</td>
+          <td>{{ item.sealed ? `已签章 ${item.sealedAt.slice(0, 10)}` : '无完成印' }}</td>
+          <td :class="item.sealCheck ? '' : 'error-text'">
+            {{ item.sealed ? (item.sealCheck ? '一致' : item.sealMessage) : '—' }}
+          </td>
+          <td>{{ item.ownerGroup }}·{{ item.ownership }}</td>
+        </tr>
+        <tr v-if="!backfillView.length">
+          <td colspan="9" class="empty-state">暂无补数凭证数据</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="stat-row" style="margin-top: 16px">
       <article v-for="item in stats" :key="item.label" class="stat-card">
         <span class="stat-label">{{ item.label }}</span>
         <strong class="stat-value">{{ item.value }}</strong>
@@ -64,7 +101,7 @@
     </table>
 
     <footer class="page-foot">
-      <span>共 {{ total }} 条任务监控记录</span>
+      <span>共 {{ total }} 条任务监控记录；补数指标与历史补数页同读一张区间凭证</span>
       <span v-if="errorMessage" class="error-text">{{ errorMessage }}</span>
     </footer>
   </section>
@@ -76,22 +113,32 @@ import { computed, onMounted, ref } from 'vue'
 import {
   downloadEntries,
   listEntries,
+  loadBackfillMonitorView,
   moduleMeta,
   runAction as applyAction,
 } from '@/api/local-service'
 import type { EntryRow } from '@/data/types'
 
 const meta = moduleMeta('monitor')
-const columns = ["配置编号", "关联任务", "监控指标", "告警阈值", "告警级别", "静默分钟", "通知渠道", "恢复条件"]
-const actions = ["提交校验", "启用监控", "停用监控"]
-const statuses = ["草稿", "待校验", "已启用", "已停用"]
-const stats = [{"label": "监控配置总数", "value": 0}, {"label": "已启用配置", "value": 0}, {"label": "待校验配置", "value": 0}]
+const columns = ['配置编号', '关联任务', '监控指标', '告警阈值', '告警级别', '静默分钟', '通知渠道', '恢复条件']
+const actions = ['提交校验', '启用监控', '停用监控']
+const statuses = ['草稿', '待校验', '已启用', '已停用']
 
 const rows = ref<EntryRow[]>([])
 const total = ref(0)
 const errorMessage = ref('')
 const filters = ref<Record<string, string>>({})
 const filterFields = columns.slice(0, 3)
+
+// 监控口径直接来自区间凭证仓储，不自行解释补数行状态。
+const backfillView = ref(loadBackfillMonitorView())
+
+const stats = computed(() => [
+  { label: '监控配置总数', value: rows.value.length },
+  { label: '补数完成印数', value: backfillView.value.filter((item) => item.sealed).length },
+  { label: '补数空洞任务', value: backfillView.value.filter((item) => item.voidCount > 0).length },
+])
+
 const statusSummary = computed(() =>
   statuses.map((status: string) => ({
     status,
@@ -128,6 +175,7 @@ function reload() {
     const payload = listEntries(meta.key, filters.value)
     rows.value = payload.items
     total.value = payload.total
+    backfillView.value = loadBackfillMonitorView()
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '任务监控列表读取失败'
   }

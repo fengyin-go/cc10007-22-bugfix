@@ -1,4 +1,64 @@
 import type { EntryRow } from './types'
+import { createVoucher, applyBackfillAction, recomputeVoucher } from './backfill/domain.ts'
+import type { IntervalVoucher } from './backfill/types.ts'
+import { GROUPS } from './backfill/access.ts'
+
+// 构造 BACK-0001 的历史现场：启动后只签收前两天即终止，后三天打成空洞。
+// 终止事件是流水里的最后一条终结事件，终态只能是「已失败」，绝不允许再出现完成印。
+function buildTerminatedVoucher(): IntervalVoucher {
+  let voucher = createVoucher('2026-09-01', '2026-09-05')
+  voucher = applyBackfillAction(voucher, '提交执行', { at: '2026-09-01T01:00:00.000Z' }).voucher
+  voucher = applyBackfillAction(voucher, '启动任务', { at: '2026-09-01T02:00:00.000Z' }).voucher
+  // 真实运行只签收了前两天：把其余分片回退为待签收，并重算派生字段。
+  voucher = recomputeVoucher({
+    ...voucher,
+    shards: voucher.shards.map((shard, index) =>
+      index >= 2 ? { ...shard, state: '待签收' as const, signedAt: null, voidReason: null } : shard,
+    ),
+  })
+  const pending = voucher.shards.filter((shard) => shard.state !== '已签收').map((shard) => shard.date)
+  voucher = applyBackfillAction(voucher, '终止任务', {
+    at: '2026-09-01T04:00:00.000Z',
+    voidDates: pending,
+    voidReason: 'BACK-0001 运行中断，分片未完成签收',
+  }).voucher
+  return voucher
+}
+
+// BACK-0002：正常跑完并归档，全分片签收、带完成印，是「已完成」的唯一合法样板。
+function buildCompletedVoucher(): IntervalVoucher {
+  let voucher = createVoucher('2026-09-02', '2026-09-04')
+  voucher = applyBackfillAction(voucher, '提交执行', { at: '2026-09-02T01:00:00.000Z' }).voucher
+  voucher = applyBackfillAction(voucher, '启动任务', { at: '2026-09-02T02:00:00.000Z' }).voucher
+  voucher = applyBackfillAction(voucher, '归档结果', { at: '2026-09-02T05:00:00.000Z' }).voucher
+  return voucher
+}
+
+// BACK-0003：运行中计划，前两天已签收、其余待签收，尚无终结事件。
+function buildRunningVoucher(): IntervalVoucher {
+  let voucher = createVoucher('2026-09-03', '2026-09-06')
+  voucher = applyBackfillAction(voucher, '提交执行', { at: '2026-09-03T01:00:00.000Z' }).voucher
+  voucher = applyBackfillAction(voucher, '启动任务', { at: '2026-09-03T02:00:00.000Z' }).voucher
+  // 运行中只完成前两天签收，后续分片仍在等待。
+  return recomputeVoucher({
+    ...voucher,
+    shards: voucher.shards.map((shard, index) =>
+      index >= 2 ? { ...shard, state: '待签收' as const, signedAt: null, voidReason: null } : shard,
+    ),
+  })
+}
+
+// BACK-0004：共享记录，所有组可见但只读，用于验证共享记录只读约束。
+function buildSharedVoucher(): IntervalVoucher {
+  let voucher = createVoucher('2026-09-07', '2026-09-08')
+  voucher = applyBackfillAction(voucher, '提交执行', { at: '2026-09-07T01:00:00.000Z' }).voucher
+  return voucher
+}
+
+const BACKFILL_VOUCHER_1 = buildTerminatedVoucher()
+const BACKFILL_VOUCHER_2 = buildCompletedVoucher()
+const BACKFILL_VOUCHER_3 = buildRunningVoucher()
+const BACKFILL_VOUCHER_4 = buildSharedVoucher()
 
 // 示例数据：首次打开时播种，之后浏览器里的改动优先，重置才会回到这份。
 export const SEED_ROWS: Record<string, EntryRow[]> = {
@@ -445,45 +505,71 @@ export const SEED_ROWS: Record<string, EntryRow[]> = {
   "backfill": [
     {
       "id": 1,
-      "status": "草稿",
-      "pending": true,
-      "abnormal": false,
+      "status": "已失败",
+      "pending": false,
+      "abnormal": true,
       "任务编号": "BACK-0001",
-      "目标表名": "历史补数样例1",
+      "目标表名": "dwd_order_detail",
       "开始日期": "2026-09-01",
-      "结束日期": "2026-09-01",
-      "并行度": "历史补数样例1",
-      "覆盖策略": "历史补数样例1",
-      "完成水位": "历史补数样例1",
-      "失败区间": "历史补数样例1"
+      "结束日期": "2026-09-05",
+      "并行度": "4",
+      "覆盖策略": "失败分片保留空洞",
+      "完成水位": BACKFILL_VOUCHER_1.completionWatermark ?? "",
+      "失败区间": "2026-09-03~2026-09-05",
+      "ownerGroup": GROUPS[0],
+      "ownership": "本组",
+      "voucher": BACKFILL_VOUCHER_1
     },
     {
       "id": 2,
-      "status": "待执行",
-      "pending": true,
-      "abnormal": true,
+      "status": "已完成",
+      "pending": false,
+      "abnormal": false,
       "任务编号": "BACK-0002",
-      "目标表名": "历史补数样例2",
+      "目标表名": "dws_trade_summary",
       "开始日期": "2026-09-02",
-      "结束日期": "2026-09-02",
-      "并行度": "历史补数样例2",
-      "覆盖策略": "历史补数样例2",
-      "完成水位": "历史补数样例2",
-      "失败区间": "历史补数样例2"
+      "结束日期": "2026-09-04",
+      "并行度": "2",
+      "覆盖策略": "全量覆盖",
+      "完成水位": BACKFILL_VOUCHER_2.completionWatermark ?? "",
+      "失败区间": "无空洞",
+      "ownerGroup": GROUPS[0],
+      "ownership": "本组",
+      "voucher": BACKFILL_VOUCHER_2
     },
     {
       "id": 3,
       "status": "运行中",
-      "pending": false,
+      "pending": true,
       "abnormal": false,
       "任务编号": "BACK-0003",
-      "目标表名": "历史补数样例3",
+      "目标表名": "ads_risk_dashboard",
       "开始日期": "2026-09-03",
-      "结束日期": "2026-09-03",
-      "并行度": "历史补数样例3",
-      "覆盖策略": "历史补数样例3",
-      "完成水位": "历史补数样例3",
-      "失败区间": "历史补数样例3"
+      "结束日期": "2026-09-06",
+      "并行度": "3",
+      "覆盖策略": "按分区合并",
+      "完成水位": BACKFILL_VOUCHER_3.completionWatermark ?? "",
+      "失败区间": "无空洞",
+      "ownerGroup": GROUPS[1],
+      "ownership": "本组",
+      "voucher": BACKFILL_VOUCHER_3
+    },
+    {
+      "id": 4,
+      "status": "待执行",
+      "pending": true,
+      "abnormal": false,
+      "任务编号": "BACK-0004",
+      "目标表名": "dim_customer_share",
+      "开始日期": "2026-09-07",
+      "结束日期": "2026-09-08",
+      "并行度": "1",
+      "覆盖策略": "共享只读",
+      "完成水位": "",
+      "失败区间": "无空洞",
+      "ownerGroup": GROUPS[2],
+      "ownership": "共享",
+      "voucher": BACKFILL_VOUCHER_4
     }
   ],
   "schema": [

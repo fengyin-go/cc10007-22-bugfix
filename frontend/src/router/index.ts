@@ -12,6 +12,7 @@ const Transform = () => import('@/views/transform/index.vue')
 const Quality = () => import('@/views/quality/index.vue')
 const Lineage = () => import('@/views/lineage/index.vue')
 const Backfill = () => import('@/views/backfill/index.vue')
+const BackfillDetail = () => import('@/views/backfill/detail.vue')
 const Schema = () => import('@/views/schema/index.vue')
 const Datasync = () => import('@/views/datasync/index.vue')
 const Snapshot = () => import('@/views/snapshot/index.vue')
@@ -35,6 +36,7 @@ const router = createRouter({
     { path: '/quality', name: 'quality', component: Quality },
     { path: '/lineage', name: 'lineage', component: Lineage },
     { path: '/backfill', name: 'backfill', component: Backfill },
+    { path: '/backfill/:id', name: 'backfill-detail', component: BackfillDetail },
     { path: '/schema', name: 'schema', component: Schema },
     { path: '/datasync', name: 'datasync', component: Datasync },
     { path: '/snapshot', name: 'snapshot', component: Snapshot },

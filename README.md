@@ -70,5 +70,46 @@ npm run build
 - 状态流转只允许在 `local-service.ts` 里改，页面组件不做业务判断。
 - 想回到初始数据：清掉浏览器里 `data-layer-studio:entries` 这一项，或调用 `resetModule(模块)`。
 
+## 历史补数：区间凭证（Interval Voucher）
+
+历史补数模块不走通用状态机，状态事实全部收敛到 `frontend/src/data/backfill/` 的区间凭证上：
+
+```text
+src/data/backfill/
+├── types.ts        凭证/分片/事件流水类型
+├── domain.ts       纯领域逻辑：分片签收、空洞区间、归档闸口、唯一序号裁决、签章指纹
+├── access.ts       本组归属控制：跨组越权拒绝，共享记录只读
+├── repository.ts   唯一读写闸口：列表、详情、监控、概览同读一张凭证
+└── *.test.ts       node:test 领域与集成测试（npm test）
+```
+
+治理规则与对应实现：
+
+1. **没有签收任何分片的计划不能获得完成印**：`applyBackfillAction('归档结果')` 在
+   `receivedCount === 0` 时整笔退回，不写归档签章。
+2. **失败计划必须保留空洞区间**：终止把未签收分片打成「失效」，由相邻分片压缩成闭区间
+   持久化在凭证 `voidIntervals` 上；带空洞的归档一律被闸口拒绝。
+3. **完成水位、失效区间、归档签章同笔提交，任一失败整笔退回**：领域层先在副本上演算，
+   只有 `ok` 时仓储才写 localStorage；失败路径不产生任何落盘写入。
+4. **终止与归档交叉由唯一序号决定终态**：每条事件分配单调递增 `seq`，`resolveStatus`
+   只认序号最大的终结事件，杜绝「已失败 + 待处理」双印章；重复归档直接拒绝，不再推水位。
+5. **补数、监控、概览同读一张凭证**：三个页面都通过 `repository` / `loadBackfillMonitorView`
+   取数，行上的状态、水位、失败区间均由凭证投影派生；详情页（`/backfill/:id`）回看时
+   重算签章指纹核对，列表残留旧对象会被指纹识别出来。
+6. **本组归属控制**：记录带 `ownerGroup` 与 `ownership`，跨组写操作拒绝、共享记录对所有组
+   只读；顶栏可切换操作组验证越权拦截。
+7. **本地存储结构版本**：`local-store` 带 `SCHEMA_VERSION`，结构升级时整体重新播种，
+   避免旧数据浅合并造成的列表/详情双口径；无凭证的旧行在读取时按日期自动补建。
+
+## 测试
+
+```bash
+cd frontend
+npm test          # node:test，21 个用例覆盖凭证规则、归属控制与仓储集成
+npm run typecheck
+npm run build
+```
+
+
 领域：数据工程
 子方向：数仓与数据湖
